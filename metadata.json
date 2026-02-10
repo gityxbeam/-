@@ -1,0 +1,5 @@
+{
+  "name": "TopoAuto v5.0",
+  "description": "A production-grade automated cloud delivery topology generation system. Features HCI/Standard modes, smart wiring with three-plane separation, and auto-layout algorithms.",
+  "requestFramePermissions": []
+}
