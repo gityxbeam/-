@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ProjectConfig, CustomIcon, VendorID, NodeType, NetworkPlane, SwitchRedundancy } from '../types';
-import { Settings, Server, Database, LayoutGrid, FileDown, Play, Share2, Upload, AlertCircle, Check, Cable, FileUp, Trash2, MousePointer2 } from 'lucide-react';
+import { Settings, Server, Database, LayoutGrid, FileDown, Play, Share2, Upload, AlertCircle, Check, Cable, FileUp, Trash2, MousePointer2, Box } from 'lucide-react';
 import { INITIAL_ICONS, NODE_TYPE_LABELS, PLANE_CONFIG } from '../constants';
 
 interface ControlPanelProps {
@@ -155,13 +155,21 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             </div>
             <div className="space-y-4">
                <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">项目名称</label>
-                <input 
-                  type="text" 
-                  value={config.projectName}
-                  onChange={(e) => handleChange('projectName', e.target.value)}
-                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                />
+                <label className="block text-xs font-medium text-gray-500 mb-1">厂商 (自动切换图标)</label>
+                <select 
+                  value={config.vendorId}
+                  onChange={(e) => handleChange('vendorId', e.target.value)}
+                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:outline-none bg-white"
+                >
+                  <option value="HUAWEI_CLOUD">华为 (Huawei)</option>
+                  <option value="ZSTACK">ZStack</option>
+                  <option value="XSKY">XSKY</option>
+                  <option value="SANGFOR">深信服 (Sangfor)</option>
+                  <option value="ALIYUN">阿里云 (Aliyun)</option>
+                  <option value="AWS">亚马逊 (AWS)</option>
+                  <option value="CISCO">思科 (Cisco)</option>
+                  <option value="CUSTOM">自定义 (Custom)</option>
+                </select>
               </div>
             </div>
           </section>
@@ -179,7 +187,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 <label className="block text-xs font-medium text-gray-500 mb-2">部署模式</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button onClick={() => handleChange('mode', 'HCI')} className={`px-3 py-2 text-xs rounded-md border ${config.mode === 'HCI' ? 'bg-brand-50 border-brand-500 text-brand-700 font-medium' : 'border-gray-200 text-gray-600'}`}>超融合 HCI</button>
-                  <button onClick={() => handleChange('mode', 'Standard')} className={`px-3 py-2 text-xs rounded-md border ${config.mode === 'Standard' ? 'bg-brand-50 border-brand-500 text-brand-700 font-medium' : 'border-gray-200 text-gray-600'}`}>标准解耦</button>
+                  <button onClick={() => handleChange('mode', 'Standard')} className={`px-3 py-2 text-xs rounded-md border ${config.mode === 'Standard' ? 'bg-brand-50 border-brand-500 text-brand-700 font-medium' : 'border-gray-200 text-gray-600'}`}>存算解耦</button>
                 </div>
               </div>
 
@@ -213,29 +221,41 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                        <SwitchConfigRow label="备份平面" enableKey="enableBackup" redundancyKey="backupRedundancy" />
                     </div>
                   )}
-
                   <hr className="border-gray-200" />
-                  
-                  {/* IPMI Toggle */}
                   <div className="flex items-center justify-between">
                      <label className="text-xs text-gray-600">启用带外管理 (IPMI)</label>
-                     <input 
-                       type="checkbox" 
-                       checked={config.network.enableIpmi}
-                       onChange={(e) => handleNetworkChange('enableIpmi', e.target.checked)}
-                       className="rounded text-brand-500 focus:ring-brand-500" 
-                     />
+                     <input type="checkbox" checked={config.network.enableIpmi} onChange={(e) => handleNetworkChange('enableIpmi', e.target.checked)} className="rounded text-brand-500 focus:ring-brand-500" />
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-4">
+                {/* Management Node Config */}
+                {config.mode === 'Standard' && (
+                  <div className="bg-orange-50 p-3 rounded-lg border border-orange-100">
+                      <div className="flex justify-between items-center mb-2">
+                          <label className="text-xs font-bold text-orange-800 flex items-center gap-1">管理节点 (MNA)</label>
+                          <label className="text-[10px] flex items-center gap-1 text-orange-700">
+                             <input type="checkbox" checked={config.reuseCompute} onChange={(e) => handleChange('reuseCompute', e.target.checked)} className="rounded text-orange-600 focus:ring-orange-500"/>
+                             复用计算节点
+                          </label>
+                      </div>
+                      {!config.reuseCompute && (
+                        <>
+                            <div className="flex justify-between text-[10px] text-gray-500 mb-1"><span>数量: {config.managementCount}</span></div>
+                            <input type="range" min="1" max="2" value={config.managementCount} onChange={(e) => handleChange('managementCount', parseInt(e.target.value))} className="w-full h-1 bg-orange-200 rounded-lg appearance-none cursor-pointer accent-orange-500" />
+                        </>
+                      )}
+                  </div>
+                )}
+
                 <div>
                   <div className="flex justify-between items-center mb-1">
                      <label className="text-xs font-medium text-gray-600 flex items-center gap-1"><Server size={14} /> 计算节点 (CNA)</label>
                      <span className="text-xs font-mono bg-white px-2 py-0.5 rounded border">{config.nodeCount}</span>
                   </div>
-                  <input type="range" min="3" max="24" value={config.nodeCount} onChange={(e) => handleChange('nodeCount', parseInt(e.target.value))} className="w-full h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-brand-500" />
+                  <input type="range" min="0" max="299" value={config.nodeCount} onChange={(e) => handleChange('nodeCount', parseInt(e.target.value))} className="w-full h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-brand-500" />
+                  {config.nodeCount > 12 && <div className="text-[10px] text-blue-500 mt-1">* 已启用堆叠视图 (>12)</div>}
                 </div>
                 {config.mode === 'Standard' && (
                    <div>
@@ -243,7 +263,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                       <label className="text-xs font-medium text-gray-600 flex items-center gap-1"><Database size={14} /> 存储节点 (SNA)</label>
                       <span className="text-xs font-mono bg-white px-2 py-0.5 rounded border">{config.storageCount}</span>
                    </div>
-                   <input type="range" min="3" max="12" value={config.storageCount} onChange={(e) => handleChange('storageCount', parseInt(e.target.value))} className="w-full h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-brand-500" />
+                   <input type="range" min="2" max="12" value={config.storageCount} onChange={(e) => handleChange('storageCount', parseInt(e.target.value))} className="w-full h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-brand-500" />
                  </div>
                 )}
               </div>
@@ -261,11 +281,20 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 <input type="checkbox" checked={config.showWatermark} onChange={(e) => handleChange('showWatermark', e.target.checked)} className="rounded text-brand-500 focus:ring-brand-500" />
                 <span className="text-sm text-gray-600">显示水印</span>
               </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={config.showBOM} onChange={(e) => handleChange('showBOM', e.target.checked)} className="rounded text-brand-500 focus:ring-brand-500" />
+                <span className="text-sm text-gray-600">显示 BOM 统计</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={config.showLegend} onChange={(e) => handleChange('showLegend', e.target.checked)} className="rounded text-brand-500 focus:ring-brand-500" />
+                <span className="text-sm text-gray-600">显示图例</span>
+              </label>
               <input type="text" value={config.watermarkText} onChange={(e) => handleChange('watermarkText', e.target.value)} disabled={!config.showWatermark} className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 disabled:bg-gray-100 disabled:text-gray-400" />
             </div>
           </section>
         </>) : (
           <section className="space-y-6">
+             {/* Icon management same as before... */}
              <div>
                 <div className="flex items-center justify-between mb-2">
                    <h3 className="text-sm font-semibold text-gray-700">设备图标库</h3>
@@ -275,8 +304,11 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                      className="text-xs border border-gray-300 rounded px-1 py-0.5"
                    >
                      <option value="HUAWEI_CLOUD">华为</option>
+                     <option value="ZSTACK">ZStack</option>
+                     <option value="XSKY">XSKY</option>
+                     <option value="SANGFOR">深信服</option>
+                     <option value="ALIYUN">阿里云</option>
                      <option value="AWS">AWS</option>
-                     <option value="AZURE">Azure</option>
                      <option value="CISCO">Cisco</option>
                      <option value="CUSTOM">自定义</option>
                    </select>
@@ -299,7 +331,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                                <AlertCircle size={20} />
                              </div>
                           )}
-                          <span className="text-[10px] text-gray-600 text-center leading-tight">{label}</span>
+                          <span className="text-[10px] text-gray-600 text-center leading-tight">{label.split(' ')[0]}</span>
                           
                           <div className={`absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity`}>
                              <button onClick={() => triggerUpload(type as NodeType)} className="text-white bg-white/20 p-1.5 rounded-full hover:bg-white/40" title="上传/更换图标">
@@ -327,7 +359,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                            {activeLineStyle === key ? <MousePointer2 size={16}/> : <Cable size={16}/>}
                          </div>
                          <div className="flex-1">
-                            <span className={`text-xs font-medium block ${activeLineStyle === key ? 'text-brand-700' : 'text-gray-700'}`}>{config.label}</span>
+                            <div className="flex justify-between items-center">
+                                <span className={`text-xs font-medium block ${activeLineStyle === key ? 'text-brand-700' : 'text-gray-700'}`}>{config.label}</span>
+                                <span className="text-[10px] font-mono text-gray-400">{config.speed}</span>
+                            </div>
                             <div className="w-full h-0 border-b mt-1" style={{ borderColor: config.color, borderStyle: config.style === 'dashed' ? 'dashed' : 'solid', borderWidth: config.width }}></div>
                          </div>
                       </div>
@@ -355,6 +390,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               <Trash2 size={14} /> 清空
             </button>
         </div>
+        <button className="w-full flex items-center justify-center gap-1 bg-white border border-brand-200 text-brand-600 hover:bg-brand-50 py-2 rounded-lg text-xs font-medium" title="导出 BOM" onClick={() => alert("BOM 导出功能将在 v5.1 版本提供 csv 下载，当前请使用截图。")}>
+            <Box size={14} /> 导出 BOM 清单
+        </button>
       </div>
     </div>
   );

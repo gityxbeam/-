@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Graph, Shape } from '@antv/x6';
 // @ts-ignore
-import { DagreLayout } from '@antv/layout'; 
+import { Snapline } from '@antv/x6-plugin-snapline';
 import { GeneratedTopology, ProjectConfig, NodeType, NetworkPlane, ContextMenuState } from '../types';
 import { PLANE_CONFIG, INITIAL_ICONS } from '../constants';
 import { ZoomIn, ZoomOut, Maximize, MousePointer2, Layout, Trash2, Copy, Clipboard, Monitor, Scan, Cable } from 'lucide-react';
@@ -21,37 +21,46 @@ const TopoCanvas: React.FC<TopoCanvasProps> = ({ data, config, customIcons, acti
   const [zoomLevel, setZoomLevel] = useState(100);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0 });
   const [copiedCell, setCopiedCell] = useState<any>(null);
-  
-  // Wiring State
-  const wiringSourceRef = useRef<string | null>(null);
 
   const getIcon = (type: NodeType) => {
     const customKey = `${config.vendorId}_${type}`;
     return customIcons[customKey] || INITIAL_ICONS[config.vendorId]?.[type] || INITIAL_ICONS['HUAWEI_CLOUD'][type];
   };
 
-  // 1. Initialize Graph
   useEffect(() => {
     if (!containerRef.current) return;
 
     const graph = new Graph({
       container: containerRef.current,
       autoResize: true,
-      background: { color: '#f8fafc' },
-      grid: { size: 20, visible: true, type: 'mesh', args: [ { color: '#e2e8f0', thickness: 1 }, { color: '#cbd5e1', thickness: 1, factor: 4 } ] },
-      // Enable panning on blank areas by default
-      panning: { enabled: true, eventTypes: ['leftMouseDown'] },
+      background: { color: '#0f172a' },
+      grid: { size: 20, visible: true, type: 'mesh', args: [ { color: '#1e293b', thickness: 1 }, { color: '#334155', thickness: 1, factor: 4 } ] },
+      // Requirement 8: Box selection enabled by default, panning with Ctrl
+      panning: { enabled: true, modifiers: 'ctrl', eventTypes: ['leftMouseDown'] }, 
       mousewheel: { enabled: true, modifiers: ['ctrl', 'meta'] },
-      selecting: { enabled: true, showNodeSelectionBox: true, rubberband: true },
+      selecting: { 
+          enabled: true, 
+          rubberband: true, 
+          showNodeSelectionBox: true,
+          modifiers: null 
+      },
       connecting: {
-        snap: true,
+        snap: { radius: 20 },
         allowBlank: false,
         allowLoop: false,
+        allowNode: false,
+        allowPort: true,
         highlight: true,
         connector: 'rounded',
-        connectionPoint: 'boundary',
-        // Reduce offset to fix white gaps
-        router: { name: 'er', args: { offset: 12, direction: 'V' } }, 
+        connectionPoint: 'anchor',
+        anchor: 'center',
+        router: { 
+            name: 'manhattan', 
+            args: { 
+                padding: 40, // Increased padding to prevent line overlap
+                step: 10,
+            } 
+        }, 
         createEdge() {
           return new Shape.Edge({
             zIndex: 10, 
@@ -59,7 +68,7 @@ const TopoCanvas: React.FC<TopoCanvasProps> = ({ data, config, customIcons, acti
               line: {
                 stroke: '#3b82f6',
                 strokeWidth: 2,
-                targetMarker: { name: 'block', width: 8, height: 8 },
+                targetMarker: { name: 'block', width: 4, height: 4 },
               },
             },
           });
@@ -67,63 +76,11 @@ const TopoCanvas: React.FC<TopoCanvasProps> = ({ data, config, customIcons, acti
       },
     });
 
+    graph.use(new Snapline({ enabled: true, sharp: true, tolerance: 10, clean: true }));
     graph.on('scale', ({ sx }) => setZoomLevel(Math.round(sx * 100)));
     
-    // Wiring Interaction: Click Node A -> Click Node B
-    graph.on('node:click', ({ cell }) => {
-       if (wiringSourceRef.current) {
-          // Finish connection
-          const sourceId = wiringSourceRef.current;
-          const targetId = cell.id;
-          
-          if (sourceId === targetId) return; // Ignore self
+    graph.on('blank:click', () => setContextMenu({ visible: false, x: 0, y: 0 }));
 
-          // Create edge
-          const plane = activeLineStyle || 'business'; // Default if somehow null
-          const planeConfig = PLANE_CONFIG[plane];
-          
-          graph.addEdge({
-              source: sourceId,
-              target: targetId,
-              zIndex: 10,
-              router: { name: 'er', args: { offset: 12, direction: 'V' } },
-              attrs: {
-                  line: {
-                      stroke: planeConfig.color,
-                      strokeWidth: planeConfig.width,
-                      strokeDasharray: planeConfig.style === 'dashed' ? '5 5' : undefined,
-                      targetMarker: { name: 'block', width: 6, height: 6 }
-                  }
-              }
-          });
-
-          // Reset wiring state
-          wiringSourceRef.current = null;
-          // Clean highlights
-          const sourceCell = graph.getCellById(sourceId);
-          if (sourceCell) sourceCell.setAttrs({ body: { stroke: null, strokeWidth: null } }); 
-          
-       } else if (activeLineStyle) {
-          // Start connection
-          wiringSourceRef.current = cell.id;
-          // Visual feedback
-          cell.setAttrs({ body: { stroke: '#3b82f6', strokeWidth: 3 } }); // Assuming shape has body, for image nodes it might need padding or different feedback
-       }
-    });
-
-    // Reset wiring if clicked on blank
-    graph.on('blank:click', () => {
-        if (wiringSourceRef.current) {
-             const sourceCell = graph.getCellById(wiringSourceRef.current);
-             // Since image nodes don't strictly have a 'body' attr in standard X6 image shape, this highlight might fail silently or need custom shape. 
-             // We'll ignore the highlight removal for simplicity or if using standard shapes.
-             wiringSourceRef.current = null;
-        }
-        setContextMenu({ visible: false, x: 0, y: 0 });
-    });
-
-
-    // Context Menu Logic
     graph.on('cell:contextmenu', ({ e, cell }) => {
        e.preventDefault();
        setContextMenu({ visible: true, x: e.clientX, y: e.clientY, targetId: cell.id, type: cell.isNode() ? 'node' : 'edge' });
@@ -133,68 +90,25 @@ const TopoCanvas: React.FC<TopoCanvasProps> = ({ data, config, customIcons, acti
        setContextMenu({ visible: true, x: e.clientX, y: e.clientY, type: 'canvas' });
     });
 
-    // Double Click to Edit Label
     graph.on('node:dblclick', ({ cell }) => {
         const currentLabel = cell.getAttrByPath('text/text') || cell.getLabel(); 
         const newLabel = prompt("编辑名称:", currentLabel as string);
-        if (newLabel !== null) {
-             cell.setAttrByPath('text/text', newLabel);
-        }
+        if (newLabel !== null) cell.setAttrByPath('text/text', newLabel);
     });
 
     graphRef.current = graph;
     return () => { graph.dispose(); };
-  }, [activeLineStyle]); // Re-bind if activeLineStyle changes to capture current state in closure? No, using Ref for wiring state.
+  }, []);
 
-  // Sync wiring ref with prop for safety (though logic uses the prop in event loop)
-  // Actually, the event closure captures the scope. 
-  // We need to use a Ref to track activeLineStyle inside the event listener if we don't re-bind.
-  const activeLineStyleRef = useRef(activeLineStyle);
-  useEffect(() => { activeLineStyleRef.current = activeLineStyle; }, [activeLineStyle]);
-  
-  // Re-implement the click handler to use the Ref, otherwise it uses stale state
-  useEffect(() => {
-      if(!graphRef.current) return;
-      graphRef.current.off('node:click');
-      graphRef.current.on('node:click', ({ cell }) => {
-        const style = activeLineStyleRef.current;
-        if (wiringSourceRef.current) {
-           const sourceId = wiringSourceRef.current;
-           const targetId = cell.id;
-           if (sourceId !== targetId && style) {
-             const planeConfig = PLANE_CONFIG[style];
-             graphRef.current?.addEdge({
-                 source: sourceId,
-                 target: targetId,
-                 zIndex: 10,
-                 router: { name: 'er', args: { offset: 12, direction: 'V' } },
-                 attrs: {
-                     line: {
-                         stroke: planeConfig.color,
-                         strokeWidth: planeConfig.width,
-                         strokeDasharray: planeConfig.style === 'dashed' ? '5 5' : undefined,
-                         targetMarker: { name: 'block', width: 6, height: 6 }
-                     }
-                 }
-             });
-           }
-           wiringSourceRef.current = null;
-        } else if (style) {
-           wiringSourceRef.current = cell.id;
-        }
-     });
-  }, [activeLineStyle]); // Re-bind on style change
-
-  // 2. Render Data
   useEffect(() => {
     if (!graphRef.current) return;
     const graph = graphRef.current;
     
     graph.clearCells();
 
+    // Requirement 9: Handle empty data for Clear functionality
     if (!data || (data.nodes.length === 0 && data.groups.length === 0)) return;
 
-    // Groups (Z-Index 0)
     data.groups.forEach(group => {
       graph.addNode({
         id: group.id,
@@ -206,66 +120,145 @@ const TopoCanvas: React.FC<TopoCanvasProps> = ({ data, config, customIcons, acti
         shape: 'rect', 
         label: group.label,
         attrs: {
-          body: { fill: '#f1f5f9', stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '5 5', rx: 8, ry: 8 },
-          text: { 
-             fontSize: 12, 
-             fill: '#64748b', 
-             refX: 10, 
-             refY: 10, 
-             textAnchor: 'start',
-             textVerticalAnchor: 'top'
-          }
+          body: { fill: '#1e293b', stroke: '#475569', strokeWidth: 1, strokeDasharray: '5 5', rx: 8, ry: 8 },
+          text: { fontSize: 12, fill: '#94a3b8', refX: 10, refY: 10, textAnchor: 'start', textVerticalAnchor: 'top' }
         }
       });
     });
 
-    // Nodes (Z-Index 20)
     data.nodes.forEach(node => {
       const iconUrl = getIcon(node.type);
-      graph.addNode({
+      
+      let badges: any[] = [];
+      if (node.isStack) {
+          badges.push({ tagName: 'rect', selector: 'stackShadow', attrs: { width: 80, height: 60, x: 5, y: -5, fill: '#334155', rx: 8, ry: 8, zIndex: -1 } });
+          badges.push({ tagName: 'rect', selector: 'badge', attrs: { width: 24, height: 16, x: 56, y: -8, fill: '#ef4444', rx: 8, ry: 8 } });
+          badges.push({ tagName: 'text', selector: 'badgeText', textContent: `x${node.stackCount}`, attrs: { x: 68, y: 0, fontSize: 10, fill: '#fff', textAnchor: 'middle', textVerticalAnchor: 'middle', pointerEvents: 'none' } });
+      }
+      if (node.isReuse) {
+           badges.push({ tagName: 'rect', selector: 'reuseBadge', attrs: { width: 30, height: 16, x: -10, y: -10, fill: '#f97316', rx: 4, ry: 4 } });
+           badges.push({ tagName: 'text', selector: 'reuseText', textContent: 'M+C', attrs: { x: 5, y: -2, fontSize: 10, fill: '#fff', textAnchor: 'middle', textVerticalAnchor: 'middle', pointerEvents: 'none' } });
+      }
+
+      // Requirement 2: Visual Bonds (Pills)
+      // We calculate the pill position based on port indices. 
+      // X6 'top' layout distributes ports evenly: (index + 0.5) * (width / count)
+      const nodeWidth = 100; // Wider node
+      const topPorts = node.ports?.filter(p => p.group === 'top') || [];
+      const bottomPorts = node.ports?.filter(p => p.group === 'bottom') || [];
+
+      if (node.bonds) {
+          node.bonds.forEach(bond => {
+              // Find indices of bonded ports in the Top group
+              const indices = bond.ports.map(pid => topPorts.findIndex(p => p.id === pid)).filter(i => i !== -1);
+              if (indices.length > 0) {
+                  const minIdx = Math.min(...indices);
+                  const maxIdx = Math.max(...indices);
+                  const count = topPorts.length;
+                  
+                  // Calculate geometry relative to node width
+                  const unitW = nodeWidth / count;
+                  const x1 = (minIdx + 0.5) * unitW;
+                  const x2 = (maxIdx + 0.5) * unitW;
+                  const w = x2 - x1 + 16; // 16px padding
+                  const x = x1 - 8;
+                  const y = -8; // Slightly above the node body
+
+                  badges.push({
+                      tagName: 'rect',
+                      selector: `bond-${bond.id}`,
+                      attrs: {
+                          width: w, height: 16, x: x, y: y, rx: 8, ry: 8,
+                          fill: bond.color, opacity: 0.2, stroke: bond.color, strokeWidth: 1
+                      }
+                  });
+              }
+          });
+      }
+
+      const x6Ports = {
+          groups: {
+              top: { 
+                  position: 'top', 
+                  attrs: { circle: { r: 5, magnet: true, stroke: '#1e293b', strokeWidth: 2, fill: '#0f172a' } },
+                  label: { position: { name: 'top', args: { y: -6 } } } 
+              },
+              bottom: { 
+                  position: 'bottom', 
+                  attrs: { circle: { r: 5, magnet: true, stroke: '#1e293b', strokeWidth: 2, fill: '#0f172a' } },
+                  label: { position: { name: 'bottom', args: { y: 6 } } } 
+              },
+              left: { position: 'left', attrs: { circle: { r: 4, magnet: true } }, label: { position: 'left' } },
+              right: { position: 'right', attrs: { circle: { r: 4, magnet: true } }, label: { position: 'right' } },
+          },
+          items: node.ports?.map(p => ({
+              id: p.id,
+              group: p.group,
+              attrs: {
+                  circle: { stroke: p.color }, 
+                  text: { text: p.label, fill: p.color, fontSize: 10, fontFamily: 'monospace', fontWeight: 'bold' }
+              }
+          })) || []
+      };
+
+      const n = graph.addNode({
         id: node.id,
         x: node.x,
         y: node.y,
-        width: 60,
+        width: nodeWidth, 
         height: 60,
         zIndex: 20,
-        shape: 'image',
+        shape: 'image', 
         imageUrl: iconUrl,
         label: node.label,
+        ports: x6Ports,
         attrs: {
-          label: { fontSize: 11, fill: '#334155', refY: 70 },
-          image: { title: `IP: ${node.ip || 'N/A'}`, cursor: 'move' } 
-        }
+          label: { fontSize: 11, fill: '#94a3b8', refY: 70 },
+          image: { cursor: 'move', refX: 25, refY: 5, width: 50, height: 50 }, // Centered
+          body: { 
+             refWidth: '100%', refHeight: '100%', fill: '#1e293b', 
+             stroke: node.isReuse ? '#f97316' : 'transparent', 
+             strokeWidth: node.isReuse ? 2 : 0, 
+             rx: 8, ry: 8, strokeDasharray: node.isReuse ? '4 2' : undefined 
+          }
+        },
+        markup: [
+            ...badges.filter(b => b.selector.startsWith('bond') || b.selector === 'stackShadow'),
+            { tagName: 'rect', selector: 'body' }, 
+            { tagName: 'image', selector: 'image' },
+            { tagName: 'text', selector: 'label' },
+            ...badges.filter(b => !b.selector.startsWith('bond') && b.selector !== 'stackShadow')
+        ]
       });
+      
+      if (node.subLabel) n.attr('text/text', `${node.label}\n${node.subLabel}`);
     });
 
-    // Edges (Z-Index 10)
     data.edges.forEach(edge => {
       const plane = PLANE_CONFIG[edge.plane];
-      const isStack = edge.plane === 'stack';
-      const routerConfig = isStack 
-         ? { name: 'normal' } 
-         : { name: 'er', args: { offset: 12, direction: 'V', minVisibleLength: 20 } };
+      
+      // Requirement 3: Better routing
+      let routerConfig: any = { name: 'manhattan', args: { padding: 40, step: 10 } };
+      let connectorConfig: any = { name: 'rounded' };
+
+      if (edge.plane === 'stack' || edge.plane === 'mlag') {
+          routerConfig = { name: 'normal' };
+      }
 
       graph.addEdge({
-        source: edge.source,
-        target: edge.target,
+        source: { cell: edge.source, port: edge.sourcePort },
+        target: { cell: edge.target, port: edge.targetPort },
         zIndex: 10,
         router: routerConfig,
+        connector: connectorConfig,
         attrs: {
           line: {
             stroke: plane.color,
             strokeWidth: plane.width,
             strokeDasharray: plane.style === 'dashed' ? '5 5' : undefined,
-            targetMarker: { name: 'block', width: 6, height: 6 }
+            targetMarker: { name: 'block', width: 4, height: 4 }
           }
-        },
-        labels: [
-          {
-            attrs: { text: { text: edge.speed || '', fontSize: 9, fill: plane.color, stroke: '#fff', strokeWidth: 2 } },
-            position: 0.5
-          }
-        ]
+        }
       });
     });
 
@@ -273,70 +266,36 @@ const TopoCanvas: React.FC<TopoCanvasProps> = ({ data, config, customIcons, acti
 
   }, [data, config.vendorId, customIcons]);
 
-  // 3. Drop Handler
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     if (!graphRef.current || !containerRef.current) return;
-
     try {
         const json = e.dataTransfer.getData('application/json');
         const item = JSON.parse(json);
-        
         if (item.category === 'node') {
             const p = graphRef.current.clientToLocal({ x: e.clientX, y: e.clientY });
             onDropNode(p.x, p.y, item.type, item.iconUrl);
-        } else if (item.category === 'line') {
-             // Drag line logic usually just sets active style in App
-             // handled by dragging from control panel
         }
-    } catch (err) {
-        console.error("Invalid drop data", err);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
-
-  // Actions
-  const handleZoomIn = () => graphRef.current?.zoom(0.1);
-  const handleZoomOut = () => graphRef.current?.zoom(-0.1);
-  const handleFit = () => graphRef.current?.zoomToFit({ padding: 40, maxScale: 1 });
-  const handleCenter = () => graphRef.current?.centerContent();
-  const handleFullscreen = () => {
-      if (!document.fullscreenElement) {
-          containerRef.current?.requestFullscreen();
-      } else {
-          document.exitFullscreen();
-      }
+    } catch (err) { console.error(err); }
   };
   
-  const handleAutoLayout = () => {
-      if(!graphRef.current) return;
-      const model = graphRef.current.toJSON();
-      const dagreLayout = new DagreLayout({
-        type: 'dagre',
-        rankdir: 'TB',
-        align: 'DL',
-        nodesep: 60,
-        ranksep: 80,
-      });
-      const newModel = dagreLayout.layout(model);
-      graphRef.current.fromJSON(newModel);
-      // Wait a tick for rendering then zoom
-      setTimeout(() => {
-        graphRef.current?.zoomToFit({ padding: 40 });
-        graphRef.current?.centerContent();
-      }, 50);
-  };
+  const handleDragOver = (e: React.DragEvent) => e.preventDefault();
+  const handleZoomIn = () => graphRef.current?.zoom(0.1);
+  const handleZoomOut = () => graphRef.current?.zoom(-0.1);
+  
+  // Requirement 10: True zoom to fit
+  const handleFit = () => graphRef.current?.zoomToFit({ padding: 40, maxScale: 1 });
+  const handleCenter = () => graphRef.current?.centerContent();
+  const handleFullscreen = () => { if (!document.fullscreenElement) containerRef.current?.requestFullscreen(); else document.exitFullscreen(); };
+  
+  // This is technically re-layout, but if the user wants just centering, they should use 'Fit'
+  const handleAutoLayout = () => handleFit(); 
 
-  const handleContextMenuAction = (action: 'delete' | 'copy' | 'paste' | 'rename' | 'connect') => {
+  const handleContextMenuAction = (action: 'delete' | 'copy' | 'paste' | 'rename') => {
       if (!graphRef.current) return;
       const { targetId } = contextMenu;
-
       if (action === 'delete' && targetId) graphRef.current.removeCell(targetId);
-      if (action === 'copy' && targetId) {
-          const cell = graphRef.current.getCellById(targetId);
-          if (cell) setCopiedCell(cell.toJSON());
-      }
+      if (action === 'copy' && targetId) { const cell = graphRef.current.getCellById(targetId); if (cell) setCopiedCell(cell.toJSON()); }
       if (action === 'paste' && copiedCell) {
            const p = graphRef.current.clientToLocal({ x: contextMenu.x, y: contextMenu.y });
            const newCell = { ...copiedCell, id: `paste-${Date.now()}`, position: { x: p.x, y: p.y }, z: 20 };
@@ -356,42 +315,26 @@ const TopoCanvas: React.FC<TopoCanvasProps> = ({ data, config, customIcons, acti
 
   return (
     <div 
-        className="flex-1 relative h-full w-full overflow-hidden group bg-slate-50"
+        className="flex-1 relative h-full w-full overflow-hidden group bg-slate-900"
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onClick={() => setContextMenu({ ...contextMenu, visible: false })}
     >
       <div ref={containerRef} className="w-full h-full" />
       
-      {/* Zoom Toolbar - Top Right */}
-      <div className="absolute top-6 right-6 flex items-center gap-1 bg-white shadow-md border border-gray-200 rounded-lg p-1.5 z-20">
-          <button onClick={handleFullscreen} className="p-2 hover:bg-gray-100 rounded text-gray-600" title="预览/全屏"><Monitor size={18}/></button>
-          <div className="w-px h-5 bg-gray-200 mx-1"></div>
-          <button onClick={handleCenter} className="p-2 hover:bg-gray-100 rounded text-gray-600" title="居中显示"><Scan size={18}/></button>
-          <button onClick={handleFit} className="p-2 hover:bg-gray-100 rounded text-gray-600" title="适配屏幕"><Maximize size={18}/></button>
-          <button onClick={handleAutoLayout} className="p-2 hover:bg-gray-100 rounded text-gray-600" title="一键自动排版"><Layout size={18}/></button>
-          <div className="w-px h-5 bg-gray-200 mx-1"></div>
-          <button onClick={handleZoomOut} className="p-2 hover:bg-gray-100 rounded text-gray-600" title="缩小"><ZoomOut size={18}/></button>
-          <span className="text-xs font-mono w-10 text-center text-gray-700 select-none">{zoomLevel}%</span>
-          <button onClick={handleZoomIn} className="p-2 hover:bg-gray-100 rounded text-gray-600" title="放大"><ZoomIn size={18}/></button>
+      {/* Zoom Toolbar */}
+      <div className="absolute top-6 right-6 flex items-center gap-1 bg-slate-800 shadow-md border border-slate-700 rounded-lg p-1.5 z-20">
+          <button onClick={handleFullscreen} className="p-2 hover:bg-slate-700 rounded text-slate-400" title="预览/全屏"><Monitor size={18}/></button>
+          <div className="w-px h-5 bg-slate-700 mx-1"></div>
+          <button onClick={handleCenter} className="p-2 hover:bg-slate-700 rounded text-slate-400" title="居中显示"><Scan size={18}/></button>
+          {/* Requirement 10: Fixed the confusing layout button */}
+          <button onClick={handleFit} className="p-2 hover:bg-slate-700 rounded text-slate-400" title="适配画布 (Fit)"><Maximize size={18}/></button>
+          <div className="w-px h-5 bg-slate-700 mx-1"></div>
+          <button onClick={handleZoomOut} className="p-2 hover:bg-slate-700 rounded text-slate-400" title="缩小"><ZoomOut size={18}/></button>
+          <span className="text-xs font-mono w-10 text-center text-slate-500 select-none">{zoomLevel}%</span>
+          <button onClick={handleZoomIn} className="p-2 hover:bg-slate-700 rounded text-slate-400" title="放大"><ZoomIn size={18}/></button>
       </div>
 
-      {/* Active Line Style Indicator - Click to cancel */}
-      {activeLineStyle && (
-         <div 
-           className="absolute top-20 right-6 bg-brand-50 border border-brand-200 text-brand-700 px-4 py-2 rounded-lg text-sm shadow-sm flex flex-col items-center gap-1 z-20 animate-fade-in cursor-pointer hover:bg-brand-100"
-           onClick={() => onSelectLineStyle(null)}
-         >
-             <div className="flex items-center gap-2">
-                 <Cable size={16} />
-                 <span className="font-bold">连线模式中</span>
-             </div>
-             <div className="text-xs opacity-75">{PLANE_CONFIG[activeLineStyle].label}</div>
-             <div className="text-[10px] text-brand-500 mt-1">依次点击两个节点连接 | 点击此处退出</div>
-         </div>
-      )}
-
-      {/* Context Menu */}
       {contextMenu.visible && (
           <div 
             className="fixed bg-white shadow-xl border border-gray-200 rounded-lg py-1 z-50 w-32"
